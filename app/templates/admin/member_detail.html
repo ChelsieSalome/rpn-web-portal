@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}{{ member.name }} — R.P.N Admin{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+  <a href="{{ url_for('admin.dashboard') }}" class="small d-block mb-3"
+     style="color:#2A5F6B;">&larr; Back to dashboard</a>
+
+  <h1 class="h4 fw-medium mb-1" style="color:#C0522A;">{{ member.name }}</h1>
+
+  {% if member.balance_status == 'urgent' %}
+    <span class="badge rpn-badge-urgent mb-3">Urgent</span>
+  {% elif member.balance_status == 'warning' %}
+    <span class="badge rpn-badge-warning mb-3">Top-up needed</span>
+  {% elif member.balance_status == 'positive' %}
+    <span class="badge rpn-badge-positive mb-3">Good standing</span>
+  {% endif %}
+
+  <div class="row g-3 mt-1">
+    <!-- Info card -->
+    <div class="col-md-6">
+      <div class="card h-100">
+        <div class="card-header rpn-card-header">Member info</div>
+        <div class="card-body p-0">
+          <table class="table table-sm mb-0">
+            <tbody>
+              <tr><td class="text-muted">Balance</td>
+                  <td class="fw-medium {% if member.balance < 0 %}text-danger{% else %}rpn-text-olive{% endif %}">
+                    {% if member.balance < 0 %}&minus;{% else %}+{% endif %}{{ member.balance_fmt }}
+                  </td></tr>
+              <tr><td class="text-muted">Email</td><td>{{ member.email or '—' }}</td></tr>
+              <tr><td class="text-muted">Status</td><td>{{ member.status }}</td></tr>
+              <tr><td class="text-muted">Coverage start</td><td>{{ member.coverage_start or '—' }}</td></tr>
+              <tr><td class="text-muted">Family size</td><td>{{ member.family_size }}</td></tr>
+              <tr><td class="text-muted">Deaths contributed</td><td>{{ member.contributed_deaths }}</td></tr>
+              <tr><td class="text-muted">Last reminded</td><td>{{ member.last_reminded or 'Never' }}</td></tr>
+              <tr><td class="text-muted">Opt-out emails</td>
+                  <td>{{ 'Yes' if member.opt_out else 'No' }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Actions card -->
+    <div class="col-md-6">
+      <div class="card h-100">
+        <div class="card-header rpn-card-header">Actions</div>
+        <div class="card-body">
+          <p class="text-muted small">Edit controls coming in Phase 3.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

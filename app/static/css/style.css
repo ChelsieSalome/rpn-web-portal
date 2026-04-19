@@ -1,0 +1,119 @@
+/* ── RPN Portal — custom styles on top of Bootstrap ── */
+
+/* Palette */
+:root {
+  --terra-cotta: #C0522A;
+  --sand:        #EDE3CF;
+  --sand-light:  #F5EFE3;
+  --sand-dark:   #DDD3BC;
+  --olive:       #5C6B2E;
+  --ochre:       #C98A1A;
+  --clay:        #B5622A;
+  --sea:         #2A5F6B;
+  --ink:         #2C2416;
+}
+
+body { background-color: var(--sand-light); color: var(--ink); }
+
+/* Navbar */
+.rpn-navbar { background-color: var(--ink); }
+.rpn-navbar .nav-link.active { color: #fff !important; border-bottom: 2px solid var(--terra-cotta); }
+
+/* Logo in navbar */
+.rpn-logo-sm {
+  width: 24px; height: 24px; background: #1a1a0e;
+  border-radius: 4px; display: flex; align-items: center; justify-content: center;
+}
+.rpn-logo-text {
+  font-family: Georgia, serif; font-size: 7px;
+  font-weight: bold; color: #CC2222; font-style: italic;
+}
+
+/* Main content offset */
+.rpn-main { padding-top: 8px; }
+
+/* Login page */
+.rpn-bg-sand { background-color: var(--sand); }
+.rpn-login-card { max-width: 400px; width: 100%; border-color: var(--sand-dark); }
+.rpn-divider { border-color: var(--sand-dark); }
+
+/* Google button */
+.rpn-btn-google {
+  background: #fff; border: 1px solid var(--sand-dark);
+  color: var(--ink); border-radius: 9999px; height: 44px;
+  font-size: 14px; font-weight: 500;
+  transition: background 0.15s;
+}
+.rpn-btn-google:hover { background: var(--sand-light); color: var(--ink); }
+
+/* Primary button */
+.rpn-btn-primary {
+  background: var(--terra-cotta); border: none; color: #fff;
+  border-radius: 9999px; font-weight: 500;
+}
+.rpn-btn-primary:hover { background: #8B3A1E; color: #fff; }
+
+/* Outline primary */
+.rpn-btn-outline-primary {
+  border: 1.5px solid var(--terra-cotta); color: var(--terra-cotta);
+  border-radius: 9999px; background: #fff;
+}
+.rpn-btn-outline-primary:hover { background: var(--terra-cotta); color: #fff; }
+
+/* Ghost button */
+.rpn-btn-ghost {
+  background: transparent; border: none; color: var(--sea); font-size: 12px;
+}
+.rpn-btn-ghost:hover { text-decoration: underline; color: var(--sea); }
+
+/* Hero balance card */
+.rpn-hero-card { border-radius: 12px; padding: 24px; color: #fff; }
+.rpn-hero-positive { background: var(--olive); }
+.rpn-hero-warning  { background: var(--ochre); }
+.rpn-hero-urgent   { background: var(--terra-cotta); }
+.rpn-hero-label    { font-size: 12px; opacity: 0.75; margin-bottom: 4px; }
+.rpn-hero-amount   { font-family: Georgia, serif; font-size: 52px; font-weight: bold; margin-bottom: 12px; line-height: 1; }
+.rpn-badge-pill    { display: inline-block; background: rgba(255,255,255,0.2); border-radius: 9999px; padding: 4px 16px; font-size: 13px; }
+.rpn-payment-box   { background: rgba(255,255,255,0.15); border-radius: 8px; padding: 12px; }
+
+/* Stat cards */
+.rpn-stat-card { border-color: var(--sand-dark); background: #fff; }
+
+/* Card header */
+.rpn-card-header {
+  background: var(--sand-light); border-bottom: 1px solid var(--sand-dark);
+  font-size: 13px; font-weight: 500; color: var(--ink);
+}
+
+/* Admin table */
+.rpn-table thead tr { background: var(--terra-cotta); color: #fff; }
+.rpn-table thead th { border: none; font-weight: 500; font-size: 12px; padding: 10px 12px; }
+.rpn-table tbody td { padding: 10px 12px; vertical-align: middle; font-size: 13px; }
+.rpn-table tbody tr:hover { background: var(--sand-light) !important; }
+.rpn-row-urgent { background: #FDF0EC !important; }
+
+/* Status badges */
+.rpn-badge-urgent   { background: var(--terra-cotta); border-radius: 9999px; }
+.rpn-badge-warning  { background: var(--ochre);       border-radius: 9999px; }
+.rpn-badge-positive { background: var(--olive);       border-radius: 9999px; }
+.rpn-badge-zero     { background: var(--sand-dark); color: #888; border-radius: 9999px; }
+
+/* Utility */
+.rpn-text-olive { color: var(--olive); }
+
+/* Icon circle */
+.rpn-icon-circle {
+  width: 48px; height: 48px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: bold;
+}
+.rpn-icon-danger { background: #FDF0EC; color: var(--terra-cotta); }
+
+/* Nav divider on mobile */
+.rpn-nav-divider { border-color: rgba(255,255,255,0.15); margin: 4px 12px; }
+
+/* Responsive hero amount */
+@media (max-width: 576px) {
+  .rpn-hero-amount { font-size: 40px; }
+  .rpn-hero-card   { padding: 18px; }
+}

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — R.P.N{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+
+  <!-- Greeting -->
+  <h1 class="h5 fw-medium mb-4" style="color:#2C2416;">
+    Good day, {{ member.name.split()[0] }}
+  </h1>
+
+  <!-- Balance hero card -->
+  {% if balance_status == 'positive' %}
+    <div class="rpn-hero-card rpn-hero-positive mb-4">
+  {% elif balance_status == 'warning' %}
+    <div class="rpn-hero-card rpn-hero-warning mb-4">
+  {% else %}
+    <div class="rpn-hero-card rpn-hero-urgent mb-4">
+  {% endif %}
+
+    <p class="rpn-hero-label">Current balance</p>
+    <p class="rpn-hero-amount">
+      {% if member.balance < 0 %}&minus;{% else %}+{% endif %}{{ balance_fmt }}
+    </p>
+
+    {% if balance_status == 'positive' %}
+      <span class="rpn-badge-pill">Good standing</span>
+    {% elif balance_status == 'warning' %}
+      <span class="rpn-badge-pill">Top-up needed</span>
+    {% else %}
+      <span class="rpn-badge-pill">Urgent</span>
+    {% endif %}
+
+    {% if member.balance < 0 %}
+    <div class="rpn-payment-box mt-3">
+      <p class="small mb-1 opacity-75">Send payment via Interac e-Transfer to:</p>
+      <p class="fw-medium mb-1">{{ payment_email }}</p>
+      <p class="small opacity-75">Deadline: {{ payment_deadline }}</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Stats row -->
+  <div class="row g-3 mb-4">
+    <div class="col-4">
+      <div class="card text-center rpn-stat-card">
+        <div class="card-body py-3">
+          <p class="h4 fw-medium mb-1">{{ member.contributed_deaths }}</p>
+          <p class="small text-muted mb-0">Deaths contributed</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="card text-center rpn-stat-card">
+        <div class="card-body py-3">
+          <p class="h4 fw-medium mb-1">{{ member.family_size }}</p>
+          <p class="small text-muted mb-0">Family covered</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-4">
+      <div class="card text-center rpn-stat-card">
+        <div class="card-body py-3">
+          <p class="fw-medium mb-1">{{ member.coverage_start or '—' }}</p>
+          <p class="small text-muted mb-0">Member since</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent activity placeholder -->
+  <div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center rpn-card-header">
+      <span>Recent activity</span>
+      <a href="{{ url_for('member.history') }}" class="small" style="color:#2A5F6B;">
+        See full history &rarr;
+      </a>
+    </div>
+    <div class="card-body text-center text-muted py-4">
+      <p class="small mb-0">Full transaction history — coming in Phase 2</p>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

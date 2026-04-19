@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Admin — R.P.N{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h5 fw-medium mb-0" style="color:#2C2416;">Member overview</h1>
+    <a href="{{ url_for('admin.reminders') }}"
+       class="btn btn-sm rpn-btn-primary">Run reminders</a>
+  </div>
+
+  <!-- Stats bar -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="card rpn-stat-card text-center">
+        <div class="card-body py-3">
+          <p class="h3 fw-medium mb-1">{{ stats.total }}</p>
+          <p class="small text-muted mb-0">Total members</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card rpn-stat-card text-center">
+        <div class="card-body py-3">
+          <p class="h3 fw-medium mb-1" style="color:#C0522A;">{{ stats.in_deficit }}</p>
+          <p class="small text-muted mb-0">In deficit</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card rpn-stat-card text-center">
+        <div class="card-body py-3">
+          <p class="h3 fw-medium mb-1" style="color:#C0522A;">{{ stats.total_owed }}</p>
+          <p class="small text-muted mb-0">Total owed</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card rpn-stat-card text-center">
+        <div class="card-body py-3">
+          <p class="h3 fw-medium mb-1" style="color:#2A5F6B;">{{ stats.probation }}</p>
+          <p class="small text-muted mb-0">On probation</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Members table -->
+  <div class="card">
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0 rpn-table">
+          <thead>
+            <tr>
+              <th>Member</th>
+              <th>Balance</th>
+              <th>Status</th>
+              <th class="d-none d-md-table-cell">Last reminded</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in members %}
+            <tr class="{% if m.balance_status == 'urgent' %}rpn-row-urgent{% endif %}">
+              <td class="fw-medium">{{ m.name }}</td>
+              <td class="{% if m.balance < 0 %}text-danger{% else %}rpn-text-olive{% endif %} fw-medium">
+                {% if m.balance < 0 %}&minus;{% else %}+{% endif %}{{ m.balance_fmt }}
+              </td>
+              <td>
+                {% if m.balance_status == 'urgent' %}
+                  <span class="badge rpn-badge-urgent">Urgent</span>
+                {% elif m.balance_status == 'warning' %}
+                  <span class="badge rpn-badge-warning">Top-up</span>
+                {% elif m.balance_status == 'positive' %}
+                  <span class="badge rpn-badge-positive">Good</span>
+                {% else %}
+                  <span class="badge rpn-badge-zero">Zero</span>
+                {% endif %}
+              </td>
+              <td class="text-muted small d-none d-md-table-cell">
+                {{ m.last_reminded or '—' }}
+              </td>
+              <td>
+                <a href="{{ url_for('admin.member_detail', member_id=m.id) }}"
+                   class="btn btn-sm rpn-btn-ghost">View &rarr;</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
