@@ -6,6 +6,8 @@
 
 ## Table of Contents
 
+### Part I — Monolithic Architecture *(current implementation)*
+
 1. [What We Are Building](#1-what-we-are-building)
 2. [Tech Stack](#2-tech-stack)
 3. [Architecture Overview](#3-architecture-overview)
@@ -22,6 +24,23 @@
 14. [What Is Done / What Is Left](#14-what-is-done--what-is-left)
 15. [Troubleshooting](#15-troubleshooting)
 16. [Design System](#16-design-system)
+
+### Part II — Microservices Architecture *(future evolution)*
+
+17. [Why Microservices — and When](#17-why-microservices--and-when)
+18. [Service Decomposition](#18-service-decomposition)
+19. [System Design](#19-system-design)
+20. [Service-by-Service Specification](#20-service-by-service-specification)
+21. [Inter-Service Communication](#21-inter-service-communication)
+22. [Shared Session Strategy](#22-shared-session-strategy)
+23. [Data Flow Diagrams](#23-data-flow-diagrams)
+24. [Docker & Docker Compose](#24-docker--docker-compose)
+25. [Kubernetes & Helm](#25-kubernetes--helm)
+26. [CI/CD Pipeline](#26-cicd-pipeline)
+27. [Observability](#27-observability)
+28. [Migration Playbook — Mono to Micro](#28-migration-playbook--mono-to-micro)
+29. [Security in a Microservices Context](#29-security-in-a-microservices-context)
+30. [Trade-offs & Decision Log](#30-trade-offs--decision-log)
 
 ---
 
@@ -884,6 +903,1091 @@ git commit -m "feat: describe what you did"
 git push origin feature/your-feature-name
 # open a pull request on GitHub
 ```
+
+---
+
+*R.P.N Portal — built with care for the community. April 2026.*
+
+---
+---
+
+# Part II — Microservices Architecture
+
+> **Status: Planned — Phase 4 & 5**
+> The monolith (Part I) must be fully working before starting this. This section is a complete design and implementation guide for when the time comes.
+
+---
+
+## 17. Why Microservices — and When
+
+### The honest trade-off
+
+```
+Monolith                          Microservices
+────────────────────────────────────────────────────────
+One process, one codebase         Multiple processes, multiple repos/folders
+Simple to run (python run.py)     Requires Docker, orchestration
+Easy to debug (one log)           Logs spread across services
+Right for < 500 users             Right for scale, team, or learning goals
+                                  Also right for DevOps portfolio depth
+```
+
+### Why we will migrate anyway
+
+Not because we need scale — we have 55 users. But because:
+
+1. **Portfolio depth** — Kubernetes, Helm, service meshes, and inter-service communication are exactly what DevOps/SRE roles test for
+2. **CKA preparation** — every K8s concept (Deployments, Services, Ingress, ConfigMaps, Secrets, health probes) maps directly to a microservice in this app
+3. **Real-world pattern** — learning the pattern on a project you understand completely is far more effective than a tutorial
+
+### The trigger to migrate
+
+Migrate when **any one** of these is true:
+- The app has real users and the admin needs zero-downtime deployments
+- You want to update auth logic without risking the member dashboard
+- You start working on the Kubernetes phase of your portfolio
+- The codebase has a second developer
+
+---
+
+## 18. Service Decomposition
+
+### The four services
+
+Each service is a **separate Flask application** with its own port, its own dependencies, and its own reason to exist.
+
+| Service | Port | Responsibility | Scales when |
+|---------|------|---------------|-------------|
+| `auth-service` | 5001 | Google OAuth, sessions, identity | Auth load increases |
+| `member-service` | 5002 | Member-facing dashboard, history, coverage | Many members checking at once |
+| `admin-service` | 5003 | Admin dashboard, member edits, reminder trigger | Admin operations grow complex |
+| `sheets-service` | 5004 | All Google Sheets read/write — internal only | Sheet operations increase |
+
+Plus two infrastructure components:
+
+| Component | Role |
+|-----------|------|
+| **Nginx** | API gateway — routes `/`, `/dashboard` → correct service |
+| **Redis** | Shared session store — so all services share login state |
+
+### Decomposition principle
+
+> **"Split on security boundary, not on function."**
+
+The sheets-service is isolated because it holds the service account credentials — a breach there is contained. The auth-service is isolated because identity is the most sensitive operation. Member and admin are split because admin has write access that member must never have.
+
+---
+
+## 19. System Design
+
+### Full architecture diagram
+
+```
+                          ┌─────────────────────────────┐
+                          │         Internet             │
+                          └──────────────┬──────────────┘
+                                         │ HTTPS :443
+                                         ▼
+                          ┌─────────────────────────────┐
+                          │         Nginx               │
+                          │      (API Gateway /         │
+                          │       Reverse Proxy)        │
+                          │                             │
+                          │  /              → auth      │
+                          │  /login/*       → auth      │
+                          │  /callback      → auth      │
+                          │  /logout        → auth      │
+                          │  /dashboard     → member    │
+                          │  /history       → member    │
+                          │  /coverage      → member    │
+                          │  /admin/*       → admin     │
+                          └──┬──────────┬──────────┬───┘
+                             │          │          │
+                   ┌─────────┘   ┌──────┘   ┌─────┘
+                   │             │          │
+                   ▼             ▼          ▼
+            ┌──────────┐  ┌──────────┐  ┌──────────┐
+            │   auth   │  │  member  │  │  admin   │
+            │ :5001    │  │ :5002    │  │ :5003    │
+            │          │  │          │  │          │
+            │ OAuth    │  │ dashboard│  │ members  │
+            │ callback │  │ history  │  │ reminders│
+            │ logout   │  │ coverage │  │ settings │
+            └────┬─────┘  └────┬─────┘  └────┬─────┘
+                 │             │              │
+                 │   Internal HTTP (not exposed to internet)
+                 │             │              │
+                 └──────┬──────┘──────────────┘
+                        │
+                        ▼
+                 ┌──────────────┐
+                 │    sheets    │
+                 │   :5004      │
+                 │              │
+                 │ GET /members │
+                 │ GET /members │
+                 │   /<email>   │
+                 │ PUT /members │
+                 │   /<row>/..  │
+                 └──────┬───────┘
+                        │
+                        ▼
+                 Google Sheets API
+                        │
+                        ▼
+                  Your Google Sheet
+
+                 ┌──────────────┐
+                 │    Redis     │
+                 │   :6379      │
+                 │              │
+                 │  Shared      │
+                 │  sessions    │
+                 │  store       │
+                 └──────────────┘
+                  ▲    ▲    ▲
+                  │    │    │
+               auth  member admin
+```
+
+### Network zones
+
+```
+PUBLIC ZONE (reachable from internet)
+  Nginx :443 / :80
+
+PRIVATE ZONE (reachable only within Docker network)
+  auth-service    :5001
+  member-service  :5002
+  admin-service   :5003
+  sheets-service  :5004   ← most sensitive, most isolated
+  Redis           :6379
+```
+
+No service except Nginx is exposed to the internet. The sheets-service in particular has **no public exposure whatsoever**.
+
+---
+
+## 20. Service-by-Service Specification
+
+### `auth-service`
+
+**Purpose:** Owns all identity operations. The only service that creates sessions.
+
+```
+Folder: services/auth/
+├── app.py
+├── routes.py         # /, /login/google, /callback, /logout, /unauthorized
+├── oauth.py          # Google OAuth client
+├── requirements.txt
+├── Dockerfile
+└── .env.example
+```
+
+**Routes:**
+
+| Method | Route | What it does |
+|--------|-------|-------------|
+| GET | `/` | Login page (redirects if session exists) |
+| GET | `/login/google` | Starts OAuth flow |
+| GET | `/callback` | Receives OAuth code, validates, creates session in Redis |
+| GET | `/logout` | Destroys session in Redis |
+| GET | `/unauthorized` | Access denied page |
+
+**Environment variables:**
+```
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+ADMIN_EMAIL
+REDIS_URL=redis://redis:6379
+SHEETS_SERVICE_URL=http://sheets-service:5004
+SECRET_KEY
+```
+
+**Logic at `/callback`:**
+1. Exchange code for token with Google
+2. Extract email from token
+3. If admin email → set `is_admin=True` in Redis session
+4. Else → call `sheets-service GET /members/<email>` to verify existence
+5. If not found or deactivated → redirect to `/unauthorized`
+6. Store session in Redis with a UUID key → set cookie with that UUID
+
+---
+
+### `member-service`
+
+**Purpose:** All member-facing pages. Read-only. Talks to sheets-service for data.
+
+```
+Folder: services/member/
+├── app.py
+├── routes.py         # /dashboard, /history, /coverage
+├── middleware.py     # login_required — checks Redis session
+├── requirements.txt
+├── Dockerfile
+└── templates/
+    ├── base.html
+    ├── dashboard.html
+    ├── history.html
+    └── coverage.html
+```
+
+**Routes:**
+
+| Method | Route | What it does |
+|--------|-------|-------------|
+| GET | `/dashboard` | Calls sheets-service, renders balance card |
+| GET | `/history` | Contribution history (Phase 2) |
+| GET | `/coverage` | Family coverage (Phase 2) |
+
+**Session validation (every request):**
+```python
+# middleware.py
+def login_required(f):
+    session_id = request.cookies.get("session_id")
+    session    = redis.get(f"session:{session_id}")
+    if not session:
+        return redirect("http://auth-service/")
+```
+
+---
+
+### `admin-service`
+
+**Purpose:** All admin operations. Privileged. Can write to sheets via sheets-service.
+
+```
+Folder: services/admin/
+├── app.py
+├── routes.py         # /admin/, /admin/members/<id>, /admin/reminders
+├── middleware.py     # admin_required — checks Redis session + is_admin flag
+├── requirements.txt
+├── Dockerfile
+└── templates/
+    ├── base.html
+    ├── dashboard.html
+    ├── member_detail.html
+    ├── reminders.html
+    └── settings.html
+```
+
+**Routes:**
+
+| Method | Route | What it does |
+|--------|-------|-------------|
+| GET | `/admin/` | Calls sheets-service for all members, renders table |
+| GET | `/admin/members/<id>` | Single member detail |
+| POST | `/admin/members/<id>/opt-out` | Calls `PUT /members/<row>/opt-out` on sheets-service |
+| GET | `/admin/reminders` | Reminder controls |
+| POST | `/admin/reminders/trigger` | Triggers Apps Script via HTTP |
+
+---
+
+### `sheets-service`
+
+**Purpose:** The only service that touches Google. Exposes a simple internal REST API.
+
+```
+Folder: services/sheets/
+├── app.py
+├── routes.py
+├── sheets.py         # All Google Sheets logic (same as current services/sheets.py)
+├── requirements.txt
+├── Dockerfile
+└── .env.example
+```
+
+**Internal API (not exposed to internet):**
+
+| Method | Route | Returns |
+|--------|-------|---------|
+| GET | `/members` | All members as JSON array |
+| GET | `/members/<email>` | Single member by email |
+| PUT | `/members/<row>/opt-out` | Updates column K |
+| PUT | `/members/<row>/reminded` | Updates column J with today's date |
+
+**Example response from `GET /members/user@gmail.com`:**
+```json
+{
+  "id": "5",
+  "row_index": 5,
+  "name": "J.L. & Family",
+  "email": "user@gmail.com",
+  "balance": -21.82,
+  "status": "active",
+  "coverage_start": "2024-01-23",
+  "family_size": 3,
+  "contributed_deaths": 135,
+  "last_reminded": "2026-04-01",
+  "opt_out": false
+}
+```
+
+**Why a JSON API and not shared code?**
+Each service runs in its own container. They cannot import from each other. HTTP is the only communication method — which is the whole point of microservices.
+
+---
+
+## 21. Inter-Service Communication
+
+### Pattern: synchronous HTTP
+
+Services call each other using Python's `requests` library. All internal calls happen over the Docker internal network — never through Nginx, never over the internet.
+
+```python
+# Example: member-service calling sheets-service
+import requests
+import os
+
+SHEETS_URL = os.getenv("SHEETS_SERVICE_URL", "http://sheets-service:5004")
+
+def get_member(email):
+    response = requests.get(f"{SHEETS_URL}/members/{email}", timeout=5)
+    if response.status_code == 404:
+        return None
+    response.raise_for_status()
+    return response.json()
+```
+
+### Timeout and error handling
+
+Every inter-service call must have:
+- A `timeout` (never let one slow service block another forever)
+- Error handling (`try/except`) so a sheets-service outage shows a friendly error, not a crash
+
+```python
+try:
+    member = get_member(email)
+except requests.Timeout:
+    # sheets-service is slow
+    return render_template("error.html", msg="Data temporarily unavailable"), 503
+except requests.RequestException:
+    # sheets-service is down
+    return render_template("error.html", msg="Service unavailable"), 503
+```
+
+### Service discovery
+
+In Docker Compose, each service is reachable by its **service name** as the hostname. No IP addresses needed:
+
+```
+http://sheets-service:5004/members
+http://redis:6379
+```
+
+In Kubernetes, this becomes a **ClusterIP Service** — same concept, different mechanism.
+
+---
+
+## 22. Shared Session Strategy
+
+### The problem with microservices and sessions
+
+Flask's default sessions are stored in a **signed cookie** — the session data lives in the browser. This works fine in a monolith. In microservices, the auth-service creates the session, but the member-service and admin-service also need to read it.
+
+**Solution: Redis as a shared session store.**
+
+```
+Browser                Redis                  Services
+───────                ─────                  ────────
+Cookie:                session:abc123 = {     auth reads/writes
+session_id=abc123  →   "email": "...",    ←   member reads
+                       "is_admin": false,     admin reads
+                       "name": "..."
+                       }
+```
+
+### How it works
+
+1. **Auth-service** after successful login:
+   ```python
+   import redis, uuid, json
+   r = redis.from_url(os.getenv("REDIS_URL"))
+
+   session_id   = str(uuid.uuid4())
+   session_data = {"email": email, "name": name, "is_admin": is_admin}
+
+   r.setex(f"session:{session_id}", 86400, json.dumps(session_data))  # 24h TTL
+   response.set_cookie("session_id", session_id, httponly=True, secure=True, samesite="Lax")
+   ```
+
+2. **Member-service / Admin-service** on every request:
+   ```python
+   session_id   = request.cookies.get("session_id")
+   session_data = r.get(f"session:{session_id}")
+
+   if not session_data:
+       return redirect("http://nginx/")   # back to login
+
+   user = json.loads(session_data)
+   ```
+
+3. **Auth-service** on logout:
+   ```python
+   r.delete(f"session:{session_id}")
+   response.delete_cookie("session_id")
+   ```
+
+### Redis security
+
+- Redis is on the internal Docker network only — never exposed to the internet
+- Sessions expire automatically (TTL = 24 hours)
+- Cookie flags: `HttpOnly` (no JS access), `Secure` (HTTPS only), `SameSite=Lax` (CSRF protection)
+
+---
+
+## 23. Data Flow Diagrams
+
+### Member login flow
+
+```
+Browser → Nginx → auth-service
+                      │
+                      │ GET /login/google
+                      │ → redirect to Google
+                      │
+                      │ Google redirects back → /callback
+                      │
+                      ├─ GET http://sheets-service:5004/members/<email>
+                      │         │
+                      │         └─ returns member dict or 404
+                      │
+                      ├─ If found: write session to Redis
+                      ├─ Set cookie on response
+                      └─ redirect → Nginx → /dashboard
+```
+
+### Member dashboard load
+
+```
+Browser → Nginx → member-service /dashboard
+                      │
+                      ├─ Read cookie session_id
+                      ├─ GET Redis session → get email
+                      │
+                      ├─ GET http://sheets-service:5004/members/<email>
+                      │         │
+                      │         └─ Google Sheets API → returns row data
+                      │
+                      └─ render dashboard.html with member data
+```
+
+### Admin triggers reminders
+
+```
+Browser → Nginx → admin-service POST /admin/reminders/trigger
+                      │
+                      ├─ Check Redis session → is_admin must be True
+                      │
+                      ├─ GET http://sheets-service:5004/members
+                      │         └─ returns all members
+                      │
+                      ├─ Filter: negative balance, not opted out, not reminded this month
+                      │
+                      ├─ For each member: POST to Google Apps Script webhook
+                      │         └─ Apps Script sends the email
+                      │
+                      ├─ PUT http://sheets-service:5004/members/<row>/reminded
+                      │
+                      └─ render result: sent X, skipped Y, errors Z
+```
+
+---
+
+## 24. Docker & Docker Compose
+
+### Dockerfile pattern (same for all services)
+
+```dockerfile
+# services/auth/Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies first (layer caching)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Non-root user for security
+RUN useradd -m appuser && chown -R appuser /app
+USER appuser
+
+EXPOSE 5001
+CMD ["gunicorn", "--workers", "2", "--bind", "0.0.0.0:5001", "app:create_app()"]
+```
+
+Each service has its own `requirements.txt` with only what it needs — `sheets-service` needs `google-api-python-client`, `auth-service` needs `authlib`, but `member-service` needs neither.
+
+### `docker-compose.yml`
+
+```yaml
+version: "3.8"
+
+services:
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - auth-service
+      - member-service
+      - admin-service
+    networks:
+      - public
+
+  auth-service:
+    build: ./services/auth
+    env_file: ./services/auth/.env
+    networks:
+      - public
+      - internal
+    depends_on:
+      - redis
+      - sheets-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  member-service:
+    build: ./services/member
+    env_file: ./services/member/.env
+    networks:
+      - public
+      - internal
+    depends_on:
+      - redis
+      - sheets-service
+
+  admin-service:
+    build: ./services/admin
+    env_file: ./services/admin/.env
+    networks:
+      - public
+      - internal
+    depends_on:
+      - redis
+      - sheets-service
+
+  sheets-service:
+    build: ./services/sheets
+    env_file: ./services/sheets/.env
+    volumes:
+      - ./service_account.json:/app/service_account.json:ro
+    networks:
+      - internal   # internal only — no public network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5004/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    networks:
+      - internal   # internal only
+    volumes:
+      - redis-data:/data
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - internal
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning:ro
+    networks:
+      - internal
+    ports:
+      - "3000:3000"
+
+networks:
+  public:    # Nginx + app services
+  internal:  # App services + Redis + sheets — never exposed
+
+volumes:
+  redis-data:
+  grafana-data:
+```
+
+### Nginx routing config
+
+```nginx
+# infrastructure/nginx/nginx.conf
+
+upstream auth   { server auth-service:5001; }
+upstream member { server member-service:5002; }
+upstream admin  { server admin-service:5003; }
+
+server {
+    listen 80;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    ssl_certificate     /etc/nginx/certs/cert.pem;
+    ssl_certificate_key /etc/nginx/certs/key.pem;
+
+    # Auth routes
+    location ~ ^/(|login|callback|logout|unauthorized) {
+        proxy_pass http://auth;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Member routes
+    location ~ ^/(dashboard|history|coverage) {
+        proxy_pass http://member;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Admin routes
+    location /admin {
+        proxy_pass http://admin;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+---
+
+## 25. Kubernetes & Helm
+
+### Why Kubernetes for this project
+
+At 55 users, you do not need Kubernetes for operational reasons. You need it for **portfolio reasons** — deploying this app on K8s gives you hands-on experience with every concept tested in the CKA exam.
+
+### K8s object mapping
+
+| Docker Compose concept | Kubernetes equivalent |
+|----------------------|----------------------|
+| `service:` block | `Deployment` + `Service` |
+| `networks: internal` | `ClusterIP` Service (no external IP) |
+| `ports: 80:80` on Nginx | `Ingress` resource |
+| `env_file:` | `ConfigMap` + `Secret` |
+| `volumes:` (persistent) | `PersistentVolumeClaim` |
+| `healthcheck:` | `livenessProbe` + `readinessProbe` |
+| `depends_on:` | `initContainers` |
+
+### Helm chart structure
+
+```
+infrastructure/helm/rpn-portal/
+├── Chart.yaml
+├── values.yaml                 # Default config — override per environment
+└── templates/
+    ├── auth-deployment.yaml
+    ├── auth-service.yaml
+    ├── member-deployment.yaml
+    ├── member-service.yaml
+    ├── admin-deployment.yaml
+    ├── admin-service.yaml
+    ├── sheets-deployment.yaml
+    ├── sheets-service.yaml     # ClusterIP only — no Ingress rule
+    ├── redis-deployment.yaml
+    ├── redis-service.yaml
+    ├── ingress.yaml            # Nginx Ingress controller rules
+    ├── configmap.yaml          # Non-secret env vars
+    └── secrets.yaml            # Sensitive env vars (base64 encoded)
+```
+
+### Example Deployment (auth-service)
+
+```yaml
+# templates/auth-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+spec:
+  replicas: {{ .Values.auth.replicas }}
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      containers:
+        - name: auth
+          image: {{ .Values.auth.image }}
+          ports:
+            - containerPort: 5001
+          envFrom:
+            - configMapRef:
+                name: rpn-config
+            - secretRef:
+                name: rpn-secrets
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+```
+
+### `values.yaml`
+
+```yaml
+auth:
+  replicas: 1
+  image: ghcr.io/chelsiesalome/rpn-auth:latest
+
+member:
+  replicas: 2        # scale members independently
+  image: ghcr.io/chelsiesalome/rpn-member:latest
+
+admin:
+  replicas: 1
+  image: ghcr.io/chelsiesalome/rpn-admin:latest
+
+sheets:
+  replicas: 1        # bottleneck is Google API quota, not our compute
+  image: ghcr.io/chelsiesalome/rpn-sheets:latest
+
+redis:
+  replicas: 1
+  image: redis:7-alpine
+```
+
+### Deploy commands
+
+```bash
+# Add Nginx Ingress controller
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+
+# Create namespace
+kubectl create namespace rpn
+
+# Deploy with Helm
+helm install rpn-portal ./infrastructure/helm/rpn-portal \
+  --namespace rpn \
+  --values infrastructure/helm/rpn-portal/values.yaml
+
+# Check rollout
+kubectl rollout status deployment/auth-service -n rpn
+kubectl rollout status deployment/member-service -n rpn
+
+# View all pods
+kubectl get pods -n rpn
+
+# View logs for a service
+kubectl logs -l app=auth-service -n rpn --follow
+```
+
+---
+
+## 26. CI/CD Pipeline
+
+### GitHub Actions — one workflow per service
+
+```yaml
+# .github/workflows/deploy.yml
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      auth:    ${{ steps.changes.outputs.auth }}
+      member:  ${{ steps.changes.outputs.member }}
+      admin:   ${{ steps.changes.outputs.admin }}
+      sheets:  ${{ steps.changes.outputs.sheets }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            auth:   services/auth/**
+            member: services/member/**
+            admin:  services/admin/**
+            sheets: services/sheets/**
+
+  build-and-push:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth, member, admin, sheets]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if unchanged
+        if: needs.detect-changes.outputs[${{ matrix.service }}] != 'true'
+        run: echo "No changes in ${{ matrix.service }} — skipping"
+
+      - name: Build and push Docker image
+        if: needs.detect-changes.outputs[${{ matrix.service }}] == 'true'
+        run: |
+          docker build -t ghcr.io/${{ github.repository }}/rpn-${{ matrix.service }}:${{ github.sha }} \
+            ./services/${{ matrix.service }}
+          docker push ghcr.io/${{ github.repository }}/rpn-${{ matrix.service }}:${{ github.sha }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Helm release
+        run: |
+          helm upgrade rpn-portal ./infrastructure/helm/rpn-portal \
+            --namespace rpn \
+            --set auth.image=ghcr.io/.../rpn-auth:${{ github.sha }} \
+            --set member.image=ghcr.io/.../rpn-member:${{ github.sha }} \
+            --atomic \
+            --timeout 5m
+```
+
+**Key concept:** `paths-filter` means only the services whose code actually changed get rebuilt. A change to `member-service` does not trigger a rebuild of `sheets-service`.
+
+---
+
+## 27. Observability
+
+### What to monitor
+
+| Metric | Service | Alert if |
+|--------|---------|---------|
+| Request latency p95 | All | > 2 seconds |
+| Error rate (5xx) | All | > 1% |
+| Sheets API call duration | sheets-service | > 3 seconds |
+| Redis connection errors | All | Any |
+| Session count | Redis | Drops to 0 unexpectedly |
+| Members in deficit | sheets-service | Increases (admin alert) |
+
+### Prometheus instrumentation
+
+Each Flask service exposes a `/metrics` endpoint using `prometheus-flask-exporter`:
+
+```python
+# In each service's app.py
+from prometheus_flask_exporter import PrometheusMetrics
+
+def create_app():
+    app = Flask(__name__)
+    metrics = PrometheusMetrics(app)
+    metrics.info("app_info", "Service info", version="1.0", service="auth")
+    return app
+```
+
+### Grafana dashboards
+
+Four dashboards — one per service — plus one overview:
+
+```
+RPN Overview
+├── Total active sessions (Redis)
+├── Request rate across all services
+├── Error rate across all services
+└── Members in deficit over time
+
+Per-Service Dashboard
+├── Request rate (req/s)
+├── Latency p50 / p95 / p99
+├── Error rate
+└── Uptime
+```
+
+### Structured logging
+
+All services log in JSON format using Python's `logging` module:
+
+```python
+import logging, json
+
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        return json.dumps({
+            "time":    self.formatTime(record),
+            "level":   record.levelname,
+            "service": "auth-service",
+            "message": record.getMessage(),
+        })
+```
+
+Logs are shipped to **Grafana Loki** via the Loki Docker driver — searchable in Grafana with LogQL.
+
+---
+
+## 28. Migration Playbook — Mono to Micro
+
+Follow these steps in order. Each step is independently testable.
+
+### Step 1 — Extract sheets-service (lowest risk)
+
+The sheets logic already lives in `app/services/sheets.py`. Wrap it in a Flask app that exposes it as an HTTP API.
+
+```bash
+mkdir -p services/sheets
+cp app/services/sheets.py services/sheets/sheets.py
+# Write services/sheets/app.py with Flask routes
+# Write services/sheets/Dockerfile
+# Test: docker run sheets-service, curl localhost:5004/members
+```
+
+Keep the monolith running. The monolith still uses its own sheets.py. Two copies temporarily — that's fine.
+
+### Step 2 — Extract auth-service
+
+```bash
+mkdir -p services/auth
+# Copy auth routes, OAuth config
+# Replace direct sheet import with HTTP call to sheets-service
+# Add Redis session writing
+# Test: docker-compose up auth sheets redis
+```
+
+### Step 3 — Extract member-service
+
+```bash
+mkdir -p services/member
+# Copy member routes + templates
+# Replace session read with Redis lookup
+# Replace sheets import with HTTP call to sheets-service
+# Test: docker-compose up auth member sheets redis
+```
+
+### Step 4 — Extract admin-service
+
+```bash
+mkdir -p services/admin
+# Copy admin routes + templates
+# Same pattern as member-service
+# Test: full docker-compose up
+```
+
+### Step 5 — Add Nginx
+
+```bash
+mkdir -p infrastructure/nginx
+# Write nginx.conf with upstream blocks and location routing
+# Add nginx to docker-compose
+# Test: curl https://localhost/ hits auth-service
+# Test: curl https://localhost/dashboard hits member-service
+```
+
+### Step 6 — Retire the monolith
+
+```bash
+# Remove apps/ directory
+# All traffic now flows through services/
+# Run full integration test: login, view dashboard, admin table
+```
+
+### Step 7 — Deploy to Kubernetes
+
+```bash
+# Write Helm chart
+# Deploy to local kind cluster first
+# Graduate to Oracle Cloud free K8s or Azure AKS
+```
+
+### Rollback strategy
+
+At every step, the previous version is still in Git. Rollback is:
+```bash
+git revert <commit>
+git push
+# CI/CD redeploys the previous version automatically
+```
+
+---
+
+## 29. Security in a Microservices Context
+
+### New attack surfaces introduced by microservices
+
+| Risk | In Monolith | In Microservices | Mitigation |
+|------|-------------|-----------------|-----------|
+| Inter-service trust | N/A | Service A could impersonate service B | Network policy: only known services on internal network |
+| Session token theft | Cookie signed by one app | Must be readable by multiple apps | Redis with strong password + internal-only network |
+| sheets-service exposure | Module import — no network | HTTP endpoint | No public network on sheets container |
+| Secrets per service | One `.env` | Multiple `.env` files | Kubernetes Secrets + vault (Phase 5) |
+| Log aggregation | One log stream | Many streams, harder to correlate | Grafana Loki with service label |
+
+### Network policy (Kubernetes)
+
+```yaml
+# Only allow admin-service to call sheets-service on port 5004
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sheets-service-policy
+spec:
+  podSelector:
+    matchLabels:
+      app: sheets-service
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: auth-service
+        - podSelector:
+            matchLabels:
+              app: member-service
+        - podSelector:
+            matchLabels:
+              app: admin-service
+      ports:
+        - port: 5004
+```
+
+This means even if an attacker somehow gets into the Docker network, they cannot reach sheets-service from an unexpected source.
+
+---
+
+## 30. Trade-offs & Decision Log
+
+| Decision | Chosen | Alternative | Reason |
+|----------|--------|-------------|--------|
+| Inter-service communication | Synchronous HTTP | Async message queue (RabbitMQ, Kafka) | Simpler, sufficient for this scale. Async adds complexity without benefit at < 1000 users |
+| Session storage | Redis | JWT tokens | JWT would require every service to verify the signature. Redis is simpler and lets us invalidate sessions instantly on logout |
+| Service count | 4 services | 2 (auth + app) or 6+ | 4 maps cleanly to security boundaries without over-engineering |
+| Sheets as DB | Keep it | Migrate to PostgreSQL | No migration cost, admin stays comfortable. Revisit at 500+ members |
+| Template sharing | Each service has its own templates | Shared template service | Simplicity. Small code duplication is worth not adding a 5th service |
+| Ingress | Nginx | Traefik, Caddy | Nginx is the industry standard, most documented, matches what most employers use |
+| Container registry | GitHub Container Registry | Docker Hub | Free for private repos when using GitHub Actions |
+| K8s cluster | Oracle Cloud free tier | AWS EKS, Azure AKS | Free forever, sufficient for this project, forces learning without cost |
 
 ---
 
